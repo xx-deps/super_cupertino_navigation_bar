@@ -1,6 +1,7 @@
 import 'dart:ui';
 
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:nested_scroll_view_plus/nested_scroll_view_plus.dart';
 import 'package:snap_scroll_physics/snap_scroll_physics.dart';
@@ -22,7 +23,9 @@ class SuperScaffold extends StatefulWidget {
     this.stretch = true,
     this.body = const SizedBox(),
     this.onCollapsed,
+    this.onRefresh,
     this.brightness,
+    this.enableRefresh = false,
     this.scrollController,
     this.transitionBetweenRoutes = true,
   }) : super(key: key) {
@@ -34,6 +37,11 @@ class SuperScaffold extends StatefulWidget {
       searchBarAnimationDurationx: appBar.searchBar!.animationDuration,
     );
   }
+
+  /// Whether the nav bar should refresh over-scroll area.
+  ///
+  /// Defaults to `false`.
+  final bool enableRefresh;
 
   /// Whether the nav bar should stretch to fill the over-scroll area.
   ///
@@ -89,6 +97,7 @@ class SuperScaffold extends StatefulWidget {
   final Widget body;
 
   final Function(bool)? onCollapsed;
+  final AsyncCallback? onRefresh;
   late final ScrollController? scrollController;
 
   @override
@@ -103,6 +112,14 @@ class _SuperScaffoldState extends State<SuperScaffold> {
   late FocusNode _focusNode;
   late ScrollController _scrollController;
   late NavigationBarStaticComponentsKeys keys;
+  bool _isTouching = false;
+  double refreshDistance = 50;
+  bool _isLoading = false;
+
+  void _setTouching(bool isTouching) {
+    _isTouching = isTouching;
+    // print("isTouching " + isTouching.toString());
+  }
 
   @override
   void initState() {
@@ -113,12 +130,58 @@ class _SuperScaffoldState extends State<SuperScaffold> {
     _focusNode = widget.appBar.searchBar!.searchFocusNode ?? FocusNode();
     _scrollController = widget.scrollController ?? ScrollController();
     WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
-      _scrollController.addListener(() {
+      _scrollController.addListener(() async {
         _scrollOffset = _scrollController.offset;
         Store.instance.scrollOffset.value = _scrollController.offset;
         checkIfCollapsed();
+        // refresh controller
+        if (!Store.instance.refreshLoading.value &&
+            widget.enableRefresh &&
+            !_isTouching &&
+            -_scrollOffset > refreshDistance) {
+          Store.instance.refreshLoading.value = true;
+          await widget.onRefresh!();
+          Store.instance.refreshLoading.value = false;
+        }
+        if (Store.instance.refreshLoading.value &&
+            _isTouching &&
+            -_scrollOffset < refreshDistance) {
+          Store.instance.refreshLoading.value = false;
+        }
       });
     });
+    /*Store.instance.refreshLoading.addListener(() async {
+      Iterable<int> numbers = List.generate(5000, (i) => i);
+      for (int number in numbers) {
+        if (!Store.instance.refreshLoading.value && _isTouching ||
+            -_scrollOffset < refreshDistance) {
+          break;
+        }
+        await Future.delayed(const Duration(milliseconds: 25));
+        _scrollController.animateTo(
+          -refreshDistance,
+          duration: Duration(milliseconds: 150),
+          curve: Curves.easeIn,
+        );
+        if (!Store.instance.refreshLoading.value && _isTouching ||
+            -_scrollOffset < refreshDistance) {
+          break;
+        }
+        await Future.delayed(const Duration(milliseconds: 75));
+        if (!Store.instance.refreshLoading.value && _isTouching ||
+            -_scrollOffset < refreshDistance) {
+          print("after _isLoading: " +
+              Store.instance.refreshLoading.value.toString() +
+              " -- " +
+              _isTouching.toString() +
+              " -- " +
+              _scrollOffset.toString() +
+              " / " +
+              refreshDistance.toString());
+          break;
+        }
+      }
+    });*/
   }
 
   checkIfCollapsed() {
@@ -187,530 +250,926 @@ class _SuperScaffoldState extends State<SuperScaffold> {
 
     double topPadding = MediaQuery.of(context).padding.top;
 
-    return PopScope(
-      canPop: !Store.instance.searchBarHasFocus.value,
-      // shouldAddCallback: Store.instance.searchBarHasFocus.value,
-      child: SizedBox(
-        width: MediaQuery.of(context).size.width,
-        height: MediaQuery.of(context).size.height,
-        child: Stack(
-          children: [
-            NestedScrollViewPlus(
-              physics: SnapScrollPhysics(
-                parent: const BouncingScrollPhysics(),
-                snaps: [
-                  if (widget.appBar.searchBar!.scrollBehavior ==
-                      SearchBarScrollBehavior.floated)
-                    Snap.avoidZone(0, widget.measures.searchContainerHeight),
-                  if (widget.appBar.searchBar!.scrollBehavior ==
-                      SearchBarScrollBehavior.floated)
-                    Snap.avoidZone(
-                        widget.measures.searchContainerHeight,
-                        widget.measures.largeTitleContainerHeight +
-                            widget.measures.searchContainerHeight),
-                  if (widget.appBar.searchBar!.scrollBehavior ==
-                      SearchBarScrollBehavior.pinned)
-                    Snap.avoidZone(
-                        0, widget.measures.largeTitleContainerHeight),
+    return Listener(
+      onPointerDown: (_) => _setTouching(true),
+      onPointerUp: (_) => _setTouching(false),
+      onPointerCancel: (_) => _setTouching(false),
+      child: PopScope(
+        canPop: !Store.instance.searchBarHasFocus.value,
+        // shouldAddCallback: Store.instance.searchBarHasFocus.value,
+        child: SizedBox(
+          width: MediaQuery.of(context).size.width,
+          height: MediaQuery.of(context).size.height,
+          child: Stack(
+            children: [
+              NestedScrollViewPlus(
+                physics: SnapScrollPhysics(
+                  parent: const BouncingScrollPhysics(),
+                  snaps: [
+                    if (widget.appBar.searchBar!.scrollBehavior ==
+                        SearchBarScrollBehavior.floated)
+                      Snap.avoidZone(0, widget.measures.searchContainerHeight),
+                    if (widget.appBar.searchBar!.scrollBehavior ==
+                        SearchBarScrollBehavior.floated)
+                      Snap.avoidZone(
+                          widget.measures.searchContainerHeight,
+                          widget.measures.largeTitleContainerHeight +
+                              widget.measures.searchContainerHeight),
+                    if (widget.appBar.searchBar!.scrollBehavior ==
+                        SearchBarScrollBehavior.pinned)
+                      Snap.avoidZone(
+                          0, widget.measures.largeTitleContainerHeight),
+                  ],
+                ),
+                controller: _scrollController,
+                headerSliverBuilder:
+                    (BuildContext context, bool innerBoxIsScrolled) => [
+                  OverlapAbsorberPlus(
+                    sliver: SliverToBoxAdapter(
+                      child: ValueListenableBuilder(
+                          valueListenable:
+                              Store.instance.searchBarAnimationStatus,
+                          builder: (context, animationStatus, child) {
+                            return ValueListenableBuilder(
+                                valueListenable: Store.instance.refreshLoading,
+                                builder: (context, asdasd, child) {
+                                  return AnimatedContainer(
+                                    duration: animationStatus ==
+                                            SearchBarAnimationStatus.paused
+                                        ? Duration.zero
+                                        : widget.measures
+                                            .searchBarAnimationDuration,
+                                    height: (Store.instance.searchBarHasFocus.value
+                                            ? (widget.appBar.searchBar!
+                                                        .animationBehavior ==
+                                                    SearchBarAnimationBehavior
+                                                        .top
+                                                ? topPadding +
+                                                    widget.measures
+                                                        .searchContainerHeight +
+                                                    widget.measures
+                                                        .bottomToolbarHeight
+                                                        .toDouble()
+                                                : topPadding +
+                                                    widget
+                                                        .measures.appbarHeight)
+                                            : topPadding +
+                                                widget.measures.appbarHeight) +
+                                        (Store.instance.refreshLoading.value
+                                            ? refreshDistance
+                                            : 0),
+                                  );
+                                });
+                          }),
+                    ),
+                  )
                 ],
+                body: widget.body,
               ),
-              controller: _scrollController,
-              headerSliverBuilder:
-                  (BuildContext context, bool innerBoxIsScrolled) => [
-                OverlapAbsorberPlus(
-                  sliver: SliverToBoxAdapter(
-                    child: ValueListenableBuilder(
-                        valueListenable:
-                            Store.instance.searchBarAnimationStatus,
-                        builder: (context, animationStatus, child) {
-                          return AnimatedContainer(
-                            duration: animationStatus ==
-                                    SearchBarAnimationStatus.paused
-                                ? Duration.zero
-                                : widget.measures.searchBarAnimationDuration,
-                            height: Store.instance.searchBarHasFocus.value
-                                ? (widget.appBar.searchBar!.animationBehavior ==
-                                        SearchBarAnimationBehavior.top
-                                    ? topPadding +
-                                        widget.measures.searchContainerHeight +
-                                        widget.measures.bottomToolbarHeight
-                                            .toDouble()
-                                    : topPadding + widget.measures.appbarHeight)
-                                : topPadding + widget.measures.appbarHeight,
-                          );
-                        }),
-                  ),
-                )
-              ],
-              body: widget.body,
-            ),
-            ValueListenableBuilder(
-                valueListenable: Store.instance.searchBarResultVisible,
-                builder: (context, searchBarResultVisible, child) {
-                  return IgnorePointer(
-                    ignoring: !searchBarResultVisible,
-                    child: AnimatedOpacity(
-                      duration: widget.measures.searchBarAnimationDuration,
-                      opacity: searchBarResultVisible ? 1 : 0,
-                      child: Container(
-                        width: MediaQuery.of(context).size.width,
-                        height: MediaQuery.of(context).size.height,
-                        color: CupertinoDynamicColor.maybeResolve(
-                                widget.appBar.searchBar!.resultColor,
-                                context) ??
-                            CupertinoTheme.of(context).scaffoldBackgroundColor,
-                        padding: EdgeInsets.only(
-                          top: topPadding +
-                              widget.measures.searchContainerHeight.toDouble() +
-                              widget.measures.bottomToolbarHeight.toDouble(),
-                        ),
-                        child: Stack(
-                          children: [
-                            const Text(
-                              ".",
-                              style: TextStyle(color: Colors.transparent),
-                            ),
-                            widget.appBar.searchBar!.searchResult,
-                          ],
+              ValueListenableBuilder(
+                  valueListenable: Store.instance.searchBarResultVisible,
+                  builder: (context, searchBarResultVisible, child) {
+                    return IgnorePointer(
+                      ignoring: !searchBarResultVisible,
+                      child: AnimatedOpacity(
+                        duration: widget.measures.searchBarAnimationDuration,
+                        opacity: searchBarResultVisible ? 1 : 0,
+                        child: Container(
+                          width: MediaQuery.of(context).size.width,
+                          height: MediaQuery.of(context).size.height,
+                          color: CupertinoDynamicColor.maybeResolve(
+                                  widget.appBar.searchBar!.resultColor,
+                                  context) ??
+                              CupertinoTheme.of(context)
+                                  .scaffoldBackgroundColor,
+                          padding: EdgeInsets.only(
+                            top: topPadding +
+                                widget.measures.searchContainerHeight
+                                    .toDouble() +
+                                widget.measures.bottomToolbarHeight.toDouble(),
+                          ),
+                          child: Stack(
+                            children: [
+                              const Text(
+                                ".",
+                                style: TextStyle(color: Colors.transparent),
+                              ),
+                              widget.appBar.searchBar!.searchResult,
+                            ],
+                          ),
                         ),
                       ),
-                    ),
-                  );
-                }),
-            ValueListenableBuilder(
-              valueListenable: Store.instance.scrollOffset,
-              builder: (context, scrollOffset, child) {
-                // full appbar height
-                double fullappbarheight =
-                    widget.appBar.searchBar!.scrollBehavior ==
-                            SearchBarScrollBehavior.floated
-                        ? clampDouble(
-                            topPadding +
-                                widget.measures.appbarHeight -
-                                _scrollOffset,
-                            topPadding +
-                                widget.measures.primaryToolbarHeight +
-                                widget.appBar.bottom!.height,
-                            widget.stretch
-                                ? 3000
-                                : topPadding + widget.measures.appbarHeight)
-                        : clampDouble(
-                            topPadding +
-                                widget.measures.appbarHeight -
-                                _scrollOffset,
-                            topPadding +
-                                widget.measures.appbarHeight -
-                                widget.measures.largeTitleContainerHeight,
-                            widget.stretch
-                                ? 3000
-                                : topPadding + widget.measures.appbarHeight);
+                    );
+                  }),
+              ValueListenableBuilder(
+                  valueListenable: Store.instance.refreshLoading,
+                  builder: (context, qwqw, child) {
+                    return ValueListenableBuilder(
+                      valueListenable: Store.instance.scrollOffset,
+                      builder: (context, scrollOffset, child) {
+                        // full appbar height
+                        double fullappbarheight = (widget
+                                        .appBar.searchBar!.scrollBehavior ==
+                                    SearchBarScrollBehavior.floated
+                                ? clampDouble(
+                                    topPadding +
+                                        widget.measures.appbarHeight -
+                                        _scrollOffset,
+                                    topPadding +
+                                        widget.measures.primaryToolbarHeight +
+                                        widget.appBar.bottom!.height,
+                                    widget.stretch
+                                        ? 3000
+                                        : topPadding +
+                                            widget.measures.appbarHeight)
+                                : clampDouble(
+                                    topPadding +
+                                        widget.measures.appbarHeight -
+                                        _scrollOffset,
+                                    topPadding +
+                                        widget.measures.appbarHeight -
+                                        widget
+                                            .measures.largeTitleContainerHeight,
+                                    widget.stretch
+                                        ? 3000
+                                        : topPadding +
+                                            widget.measures.appbarHeight)) +
+                            (Store.instance.refreshLoading.value
+                                ? refreshDistance
+                                : 0);
 
-                // large title height
-                double largeTitleHeight =
-                    widget.appBar.searchBar!.scrollBehavior ==
-                            SearchBarScrollBehavior.floated
-                        ? (_scrollOffset > widget.measures.searchContainerHeight
-                            ? clampDouble(
-                                widget.measures.largeTitleContainerHeight -
-                                    (_scrollOffset -
-                                        widget.measures.searchContainerHeight),
-                                0,
-                                widget.measures.largeTitleContainerHeight)
-                            : widget.measures.largeTitleContainerHeight)
-                        : clampDouble(
-                            widget.measures.largeTitleContainerHeight -
-                                _scrollOffset,
-                            0,
-                            widget.measures.largeTitleContainerHeight);
-
-                // searchbar height
-                double searchBarHeight =
-                    widget.appBar.searchBar!.scrollBehavior ==
-                            SearchBarScrollBehavior.floated
-                        ? (Store.instance.searchBarHasFocus.value
-                            ? widget.measures.searchContainerHeight
+                        // large title height
+                        double largeTitleHeight = widget
+                                    .appBar.searchBar!.scrollBehavior ==
+                                SearchBarScrollBehavior.floated
+                            ? (_scrollOffset >
+                                    widget.measures.searchContainerHeight
+                                ? clampDouble(
+                                    widget.measures.largeTitleContainerHeight -
+                                        (_scrollOffset -
+                                            widget.measures
+                                                .searchContainerHeight),
+                                    0,
+                                    widget.measures.largeTitleContainerHeight)
+                                : widget.measures.largeTitleContainerHeight)
                             : clampDouble(
-                                widget.measures.searchContainerHeight -
+                                widget.measures.largeTitleContainerHeight -
                                     _scrollOffset,
                                 0,
-                                widget.measures.searchContainerHeight))
-                        : widget.measures.searchContainerHeight;
+                                widget.measures.largeTitleContainerHeight);
 
-                double opacity = widget.appBar.searchBar!.scrollBehavior ==
-                        SearchBarScrollBehavior.floated
-                    ? (Store.instance.searchBarHasFocus.value
-                        ? 1
-                        : clampDouble(1 - _scrollOffset / 10, 0, 1))
-                    : 1;
+                        // searchbar height
+                        double searchBarHeight =
+                            widget.appBar.searchBar!.scrollBehavior ==
+                                    SearchBarScrollBehavior.floated
+                                ? (Store.instance.searchBarHasFocus.value
+                                    ? widget.measures.searchContainerHeight
+                                    : clampDouble(
+                                        widget.measures.searchContainerHeight -
+                                            _scrollOffset,
+                                        0,
+                                        widget.measures.searchContainerHeight))
+                                : widget.measures.searchContainerHeight;
 
-                double titleOpacity = widget.appBar.searchBar!.scrollBehavior ==
-                        SearchBarScrollBehavior.floated
-                    ? (_scrollOffset >=
-                            (widget.measures.appbarHeightExceptPrimaryToolbar -
-                                widget.appBar.bottom!.height)
-                        ? 1
-                        : (widget.measures.largeTitleContainerHeight > 0
-                            ? 0
-                            : 1))
-                    : (_scrollOffset >=
-                            (widget.measures.largeTitleContainerHeight)
-                        ? 1
-                        : (widget.measures.largeTitleContainerHeight > 0
-                            ? 0
-                            : 1));
+                        double opacity =
+                            widget.appBar.searchBar!.scrollBehavior ==
+                                    SearchBarScrollBehavior.floated
+                                ? (Store.instance.searchBarHasFocus.value
+                                    ? 1
+                                    : clampDouble(1 - _scrollOffset / 10, 0, 1))
+                                : 1;
 
-                double focussedToolbar = topPadding +
-                    widget.measures.searchContainerHeight +
-                    widget.appBar.bottom!.height;
+                        double titleOpacity = widget
+                                    .appBar.searchBar!.scrollBehavior ==
+                                SearchBarScrollBehavior.floated
+                            ? (_scrollOffset >=
+                                    (widget.measures
+                                            .appbarHeightExceptPrimaryToolbar -
+                                        widget.appBar.bottom!.height)
+                                ? 1
+                                : (widget.measures.largeTitleContainerHeight > 0
+                                    ? 0
+                                    : 1))
+                            : (_scrollOffset >=
+                                    (widget.measures.largeTitleContainerHeight)
+                                ? 1
+                                : (widget.measures.largeTitleContainerHeight > 0
+                                    ? 0
+                                    : 1));
 
-                double scaleTitle = _scrollOffset < 0
-                    ? clampDouble((1 - _scrollOffset / 1500), 1, 1.12)
-                    : 1;
+                        double focussedToolbar = topPadding +
+                            widget.measures.searchContainerHeight +
+                            widget.appBar.bottom!.height;
 
-                if (widget.appBar.searchBar!.animationBehavior ==
-                        SearchBarAnimationBehavior.steady &&
-                    Store.instance.searchBarHasFocus.value) {
-                  fullappbarheight = topPadding + widget.measures.appbarHeight;
-                  largeTitleHeight = widget.measures.largeTitleContainerHeight;
-                  scaleTitle = 1;
-                  titleOpacity = 0;
-                }
-                if (!widget.stretch) scaleTitle = 1;
-                if (widget.appBar.alwaysShowTitle) titleOpacity = 1;
-                if (!widget.appBar.searchBar!.enabled) opacity = 0;
+                        double scaleTitle = _scrollOffset < 0
+                            ? clampDouble((1 - _scrollOffset / 1500), 1, 1.12)
+                            : 1;
 
-                return ValueListenableBuilder(
-                    valueListenable: Store.instance.searchBarAnimationStatus,
-                    builder: (context, animationStatus, child) {
-                      return AnimatedPositioned(
-                        duration:
-                            animationStatus == SearchBarAnimationStatus.paused
-                                ? Duration.zero
-                                : widget.measures.searchBarAnimationDuration,
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        height: Store.instance.searchBarHasFocus.value
-                            ? (widget.appBar.searchBar!.animationBehavior ==
-                                    SearchBarAnimationBehavior.top
-                                ? focussedToolbar
-                                : fullappbarheight)
-                            : fullappbarheight,
-                        child: wrapWithBackground(
-                          border: widget.appBar.border,
-                          backgroundColor: CupertinoDynamicColor.maybeResolve(
-                                  widget.appBar.backgroundColor, context) ??
-                              CupertinoTheme.of(context).barBackgroundColor,
-                          brightness: widget.brightness,
-                          child: Builder(builder: (context) {
-                            Widget childd = Column(
-                              mainAxisAlignment: MainAxisAlignment.end,
-                              children: [
-                                AnimatedContainer(
-                                  height: Store.instance.searchBarHasFocus.value
-                                      ? (widget.appBar.searchBar!
-                                                  .animationBehavior ==
-                                              SearchBarAnimationBehavior.top
-                                          ? MediaQuery.paddingOf(context).top
-                                          : widget.measures
-                                                  .primaryToolbarHeight +
-                                              MediaQuery.paddingOf(context).top)
-                                      : widget.measures.primaryToolbarHeight +
-                                          MediaQuery.paddingOf(context).top,
-                                  duration: animationStatus ==
-                                          SearchBarAnimationStatus.paused
-                                      ? Duration.zero
-                                      : widget
-                                          .measures.searchBarAnimationDuration,
-                                  child: AnimatedOpacity(
-                                    duration: animationStatus ==
-                                            SearchBarAnimationStatus.paused
-                                        ? Duration.zero
-                                        : widget.measures
-                                            .titleOpacityAnimationDuration,
-                                    opacity: Store
-                                            .instance.searchBarHasFocus.value
-                                        ? (widget.appBar.searchBar!
-                                                    .animationBehavior ==
-                                                SearchBarAnimationBehavior.top
-                                            ? 0
-                                            : 1)
-                                        : 1,
-                                    child: PersistentNavigationBar(
-                                      components: components,
-                                      middleVisible:
-                                          widget.appBar.alwaysShowTitle
-                                              ? null
-                                              : titleOpacity != 0,
-                                    ),
-                                  ),
-                                ),
-                                const Spacer(),
-                                Padding(
-                                  padding: widget.appBar.largeTitle!.padding,
-                                  child: AnimatedOpacity(
-                                    duration: animationStatus ==
-                                            SearchBarAnimationStatus.paused
-                                        ? Duration.zero
-                                        : widget.measures
-                                            .titleOpacityAnimationDuration,
-                                    opacity: Store
-                                            .instance.searchBarHasFocus.value
-                                        ? (widget.appBar.searchBar!
-                                                    .animationBehavior ==
-                                                SearchBarAnimationBehavior.top
-                                            ? 0
-                                            : 1)
-                                        : 1,
-                                    child: AnimatedContainer(
-                                      height: Store
-                                              .instance.searchBarHasFocus.value
-                                          ? (widget.appBar.searchBar!
-                                                      .animationBehavior ==
-                                                  SearchBarAnimationBehavior.top
-                                              ? 0
-                                              : largeTitleHeight)
-                                          : largeTitleHeight,
-                                      duration: animationStatus ==
-                                              SearchBarAnimationStatus.paused
-                                          ? Duration.zero
-                                          : widget.measures
-                                              .searchBarAnimationDuration,
-                                      child: Padding(
-                                        padding: EdgeInsets.only(
-                                            bottom: widget.measures
-                                                        .largeTitleContainerHeight >
-                                                    0
-                                                ? 8.0
-                                                : 0),
-                                        child: Stack(
-                                          children: [
-                                            Positioned(
-                                              bottom: 0,
-                                              left: 0,
-                                              right: 0,
-                                              child: Row(
-                                                children: [
-                                                  Transform.scale(
-                                                    scale: scaleTitle,
-                                                    filterQuality:
-                                                        FilterQuality.high,
-                                                    alignment:
-                                                        Alignment.bottomLeft,
-                                                    child:
-                                                        components.largeTitle,
-                                                  ),
-                                                  const Spacer(),
-                                                  components.largeTitleActions!,
-                                                  /*...?widget
-                                                                  .appBar!
-                                                                  .largeTitle!
-                                                                  .actions*/
-                                                ],
-                                              ),
+                        if (widget.appBar.searchBar!.animationBehavior ==
+                                SearchBarAnimationBehavior.steady &&
+                            Store.instance.searchBarHasFocus.value) {
+                          fullappbarheight =
+                              topPadding + widget.measures.appbarHeight;
+                          largeTitleHeight =
+                              widget.measures.largeTitleContainerHeight;
+                          scaleTitle = 1;
+                          titleOpacity = 0;
+                        }
+                        if (!widget.stretch) scaleTitle = 1;
+                        if (widget.appBar.alwaysShowTitle) titleOpacity = 1;
+                        if (!widget.appBar.searchBar!.enabled) opacity = 0;
+
+                        return ValueListenableBuilder(
+                            valueListenable:
+                                Store.instance.searchBarAnimationStatus,
+                            builder: (context, animationStatus, child) {
+                              return AnimatedPositioned(
+                                duration: animationStatus ==
+                                        SearchBarAnimationStatus.paused
+                                    ? Duration.zero
+                                    : widget
+                                        .measures.searchBarAnimationDuration,
+                                top: 0,
+                                left: 0,
+                                right: 0,
+                                height: Store.instance.searchBarHasFocus.value
+                                    ? (widget.appBar.searchBar!
+                                                .animationBehavior ==
+                                            SearchBarAnimationBehavior.top
+                                        ? focussedToolbar
+                                        : fullappbarheight)
+                                    : fullappbarheight,
+                                child: wrapWithBackground(
+                                  border: widget.appBar.border,
+                                  backgroundColor:
+                                      CupertinoDynamicColor.maybeResolve(
+                                              widget.appBar.backgroundColor,
+                                              context) ??
+                                          CupertinoTheme.of(context)
+                                              .barBackgroundColor,
+                                  brightness: widget.brightness,
+                                  child: Builder(builder: (context) {
+                                    Widget childd = Column(
+                                      mainAxisAlignment: MainAxisAlignment.end,
+                                      children: [
+                                        AnimatedContainer(
+                                          height: Store.instance
+                                                  .searchBarHasFocus.value
+                                              ? (widget.appBar.searchBar!
+                                                          .animationBehavior ==
+                                                      SearchBarAnimationBehavior
+                                                          .top
+                                                  ? MediaQuery.paddingOf(
+                                                          context)
+                                                      .top
+                                                  : widget.measures
+                                                          .primaryToolbarHeight +
+                                                      MediaQuery.paddingOf(
+                                                              context)
+                                                          .top)
+                                              : widget.measures
+                                                      .primaryToolbarHeight +
+                                                  MediaQuery.paddingOf(context)
+                                                      .top,
+                                          duration: animationStatus ==
+                                                  SearchBarAnimationStatus
+                                                      .paused
+                                              ? Duration.zero
+                                              : widget.measures
+                                                  .searchBarAnimationDuration,
+                                          child: AnimatedOpacity(
+                                            duration: animationStatus ==
+                                                    SearchBarAnimationStatus
+                                                        .paused
+                                                ? Duration.zero
+                                                : widget.measures
+                                                    .titleOpacityAnimationDuration,
+                                            opacity: Store.instance
+                                                    .searchBarHasFocus.value
+                                                ? (widget.appBar.searchBar!
+                                                            .animationBehavior ==
+                                                        SearchBarAnimationBehavior
+                                                            .top
+                                                    ? 0
+                                                    : 1)
+                                                : 1,
+                                            child: PersistentNavigationBar(
+                                              components: components,
+                                              middleVisible:
+                                                  widget.appBar.alwaysShowTitle
+                                                      ? null
+                                                      : titleOpacity != 0,
                                             ),
-                                          ],
+                                          ),
                                         ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                Padding(
-                                  padding: widget.appBar.searchBar!.padding,
-                                  child: SizedBox(
-                                    height: searchBarHeight,
-                                    child: Padding(
-                                      padding: EdgeInsets.only(
-                                          bottom: Measures
-                                              .instance.searchBarBottomPadding),
-                                      child: Stack(
-                                        children: [
-                                          KeyedSubtree(
-                                            key: keys.searchBarKey,
-                                            child: IgnorePointer(
-                                              ignoring: true,
-                                              child: Row(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.stretch,
-                                                children: [
-                                                  Flexible(
-                                                    child:
-                                                        CupertinoSearchTextField(
-                                                      prefixIcon: Opacity(
-                                                        opacity: Store
-                                                                .instance
-                                                                .searchBarHasFocus
-                                                                .value
-                                                            ? 0
-                                                            : opacity,
-                                                        child: widget
-                                                            .appBar
-                                                            .searchBar!
-                                                            .prefixIcon,
-                                                      ),
-                                                      placeholder: Store
-                                                              .instance
-                                                              .searchBarHasFocus
-                                                              .value
-                                                          ? ""
-                                                          : widget
-                                                              .appBar
-                                                              .searchBar!
-                                                              .placeholderText,
-                                                      placeholderStyle: widget
-                                                          .appBar
-                                                          .searchBar!
-                                                          .placeholderTextStyle
-                                                          .copyWith(
-                                                        color: widget
-                                                            .appBar
-                                                            .searchBar!
-                                                            .placeholderTextStyle
-                                                            .color!
-                                                            .withOpacity(
-                                                                opacity),
-                                                      ),
-                                                      style: widget.appBar
-                                                          .searchBar!.textStyle
-                                                          .copyWith(
-                                                        color: widget
-                                                                .appBar
-                                                                .searchBar!
-                                                                .textStyle
-                                                                .color ??
-                                                            Theme.of(context)
-                                                                .textTheme
-                                                                .bodyMedium!
-                                                                .color,
-                                                      ),
-                                                      backgroundColor: widget
-                                                          .appBar
-                                                          .searchBar!
-                                                          .backgroundColor,
-                                                    ),
-                                                  ),
-                                                  Row(
-                                                    mainAxisAlignment:
-                                                        MainAxisAlignment
-                                                            .center,
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment
-                                                            .center,
+                                        if (widget.enableRefresh)
+                                          Container(
+                                            height: clampDouble(
+                                                    -scrollOffset, 0, 1000) +
+                                                (Store.instance.refreshLoading
+                                                        .value
+                                                    ? 50
+                                                    : 0),
+                                            width: double.infinity,
+                                            clipBehavior: Clip.none,
+                                            color: Colors.transparent,
+                                            child: OverflowBox(
+                                              minHeight: 0.0,
+                                              maxHeight: double.infinity,
+                                              alignment: Alignment.topCenter,
+                                              child: Opacity(
+                                                opacity: Store.instance
+                                                        .refreshLoading.value
+                                                    ? 1
+                                                    : clampDouble(
+                                                        -scrollOffset / 15,
+                                                        0,
+                                                        1),
+                                                child: Transform.scale(
+                                                  scale: Store.instance
+                                                          .refreshLoading.value
+                                                      ? 1
+                                                      : clampDouble(
+                                                          0.5 +
+                                                              -scrollOffset /
+                                                                  25,
+                                                          0.5,
+                                                          1),
+                                                  child: Stack(
+                                                    alignment: Alignment.center,
                                                     children: [
-                                                      for (SuperAction searchAction
-                                                          in widget
-                                                              .appBar
-                                                              .searchBar!
-                                                              .actions)
-                                                        searchAction.behavior ==
-                                                                SuperActionBehavior
-                                                                    .alwaysVisible
-                                                            ? searchAction
-                                                            : const SizedBox(),
-                                                      AnimatedCrossFade(
-                                                          firstChild: Center(
-                                                            child: Row(
-                                                              children: widget
-                                                                  .appBar
-                                                                  .searchBar!
-                                                                  .actions
-                                                                  .where((e) =>
-                                                                      e.behavior ==
-                                                                      SuperActionBehavior
-                                                                          .visibleOnFocus)
-                                                                  .toList(),
-                                                            ),
-                                                          ),
-                                                          secondChild:
-                                                              const SizedBox(),
-                                                          crossFadeState: Store
-                                                                  .instance
-                                                                  .searchBarHasFocus
-                                                                  .value
-                                                              ? CrossFadeState
-                                                                  .showFirst
-                                                              : CrossFadeState
-                                                                  .showSecond,
-                                                          duration: widget
-                                                              .measures
-                                                              .standartAnimationDuration),
-                                                      AnimatedCrossFade(
-                                                          firstChild: Center(
-                                                            child: Row(
-                                                              children: widget
-                                                                  .appBar
-                                                                  .searchBar!
-                                                                  .actions
-                                                                  .where((e) =>
-                                                                      e.behavior ==
-                                                                      SuperActionBehavior
-                                                                          .visibleOnUnFocus)
-                                                                  .toList(),
-                                                            ),
-                                                          ),
-                                                          secondChild:
-                                                              const SizedBox(),
-                                                          crossFadeState: Store
-                                                                  .instance
-                                                                  .searchBarHasFocus
-                                                                  .value
-                                                              ? CrossFadeState
-                                                                  .showSecond
-                                                              : CrossFadeState
-                                                                  .showFirst,
-                                                          duration: widget
-                                                              .measures
-                                                              .standartAnimationDuration),
-                                                      Center(
-                                                        child: CupertinoButton(
-                                                          minSize: 0,
-                                                          padding:
-                                                              EdgeInsets.zero,
-                                                          color: Colors
-                                                              .transparent,
-                                                          onPressed: () {
-                                                            searchBarFocusThings(
-                                                                false);
-                                                            _focusNode
-                                                                .unfocus();
-                                                            _editingController
-                                                                .clear();
-                                                          },
-                                                          child:
-                                                              AnimatedContainer(
-                                                            duration: widget
-                                                                .measures
-                                                                .standartAnimationDuration,
-                                                            width: Store
-                                                                    .instance
-                                                                    .searchBarHasFocus
-                                                                    .value
-                                                                ? textSize(
-                                                                    widget
-                                                                        .appBar
-                                                                        .searchBar!
-                                                                        .cancelButtonText,
-                                                                    widget
-                                                                        .appBar
-                                                                        .searchBar!
-                                                                        .cancelTextStyle)
-                                                                : 0,
-                                                            child: Align(
-                                                              alignment: Alignment
-                                                                  .centerRight,
-                                                              child: Text(
-                                                                  widget
-                                                                      .appBar
-                                                                      .searchBar!
-                                                                      .cancelButtonText,
-                                                                  style: widget
-                                                                      .appBar
-                                                                      .searchBar!
-                                                                      .cancelTextStyle,
-                                                                  maxLines: 1),
+                                                      CupertinoActivityIndicator(
+                                                        radius: 15.0,
+                                                        animating: -_scrollOffset >=
+                                                                refreshDistance ||
+                                                            Store
+                                                                .instance
+                                                                .refreshLoading
+                                                                .value,
+                                                      ),
+                                                      SizedBox(
+                                                        width: 20,
+                                                        height: 20,
+                                                        child: Transform.scale(
+                                                          scaleX: -1,
+                                                          child: CustomPaint(
+                                                            painter:
+                                                                CirclePainter(
+                                                              _scrollOffset +
+                                                                  (Store
+                                                                          .instance
+                                                                          .refreshLoading
+                                                                          .value
+                                                                      ? -50
+                                                                      : 0),
+                                                              CupertinoDynamicColor.maybeResolve(
+                                                                      widget
+                                                                          .appBar
+                                                                          .backgroundColor,
+                                                                      context) ??
+                                                                  CupertinoTheme.of(
+                                                                          context)
+                                                                      .barBackgroundColor,
                                                             ),
                                                           ),
                                                         ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        const Spacer(),
+                                        Padding(
+                                          padding:
+                                              widget.appBar.largeTitle!.padding,
+                                          child: AnimatedOpacity(
+                                            duration: animationStatus ==
+                                                    SearchBarAnimationStatus
+                                                        .paused
+                                                ? Duration.zero
+                                                : widget.measures
+                                                    .titleOpacityAnimationDuration,
+                                            opacity: Store.instance
+                                                    .searchBarHasFocus.value
+                                                ? (widget.appBar.searchBar!
+                                                            .animationBehavior ==
+                                                        SearchBarAnimationBehavior
+                                                            .top
+                                                    ? 0
+                                                    : 1)
+                                                : 1,
+                                            child: AnimatedContainer(
+                                              height: Store.instance
+                                                      .searchBarHasFocus.value
+                                                  ? (widget.appBar.searchBar!
+                                                              .animationBehavior ==
+                                                          SearchBarAnimationBehavior
+                                                              .top
+                                                      ? 0
+                                                      : largeTitleHeight)
+                                                  : largeTitleHeight,
+                                              duration: animationStatus ==
+                                                      SearchBarAnimationStatus
+                                                          .paused
+                                                  ? Duration.zero
+                                                  : widget.measures
+                                                      .searchBarAnimationDuration,
+                                              child: Padding(
+                                                padding: EdgeInsets.only(
+                                                    bottom: widget.measures
+                                                                .largeTitleContainerHeight >
+                                                            0
+                                                        ? 8.0
+                                                        : 0),
+                                                child: Stack(
+                                                  children: [
+                                                    Positioned(
+                                                      bottom: 0,
+                                                      left: 0,
+                                                      right: 0,
+                                                      child: Row(
+                                                        children: [
+                                                          Transform.scale(
+                                                            scale: scaleTitle,
+                                                            filterQuality:
+                                                                FilterQuality
+                                                                    .high,
+                                                            alignment: Alignment
+                                                                .bottomLeft,
+                                                            child: components
+                                                                .largeTitle,
+                                                          ),
+                                                          const Spacer(),
+                                                          components
+                                                              .largeTitleActions!,
+                                                          /*...?widget
+                                                                        .appBar!
+                                                                        .largeTitle!
+                                                                        .actions*/
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                        Padding(
+                                          padding:
+                                              widget.appBar.searchBar!.padding,
+                                          child: SizedBox(
+                                            height: searchBarHeight,
+                                            child: Padding(
+                                              padding: EdgeInsets.only(
+                                                  bottom: Measures.instance
+                                                      .searchBarBottomPadding),
+                                              child: Stack(
+                                                children: [
+                                                  KeyedSubtree(
+                                                    key: keys.searchBarKey,
+                                                    child: IgnorePointer(
+                                                      ignoring: true,
+                                                      child: Row(
+                                                        crossAxisAlignment:
+                                                            CrossAxisAlignment
+                                                                .stretch,
+                                                        children: [
+                                                          Flexible(
+                                                            child:
+                                                                CupertinoSearchTextField(
+                                                              prefixIcon:
+                                                                  Opacity(
+                                                                opacity: Store
+                                                                        .instance
+                                                                        .searchBarHasFocus
+                                                                        .value
+                                                                    ? 0
+                                                                    : opacity,
+                                                                child: widget
+                                                                    .appBar
+                                                                    .searchBar!
+                                                                    .prefixIcon,
+                                                              ),
+                                                              placeholder: Store
+                                                                      .instance
+                                                                      .searchBarHasFocus
+                                                                      .value
+                                                                  ? ""
+                                                                  : widget
+                                                                      .appBar
+                                                                      .searchBar!
+                                                                      .placeholderText,
+                                                              placeholderStyle:
+                                                                  widget
+                                                                      .appBar
+                                                                      .searchBar!
+                                                                      .placeholderTextStyle
+                                                                      .copyWith(
+                                                                color: widget
+                                                                    .appBar
+                                                                    .searchBar!
+                                                                    .placeholderTextStyle
+                                                                    .color!
+                                                                    .withOpacity(
+                                                                        opacity),
+                                                              ),
+                                                              style: widget
+                                                                  .appBar
+                                                                  .searchBar!
+                                                                  .textStyle
+                                                                  .copyWith(
+                                                                color: widget
+                                                                        .appBar
+                                                                        .searchBar!
+                                                                        .textStyle
+                                                                        .color ??
+                                                                    Theme.of(
+                                                                            context)
+                                                                        .textTheme
+                                                                        .bodyMedium!
+                                                                        .color,
+                                                              ),
+                                                              backgroundColor: widget
+                                                                  .appBar
+                                                                  .searchBar!
+                                                                  .backgroundColor,
+                                                            ),
+                                                          ),
+                                                          Row(
+                                                            mainAxisAlignment:
+                                                                MainAxisAlignment
+                                                                    .center,
+                                                            crossAxisAlignment:
+                                                                CrossAxisAlignment
+                                                                    .center,
+                                                            children: [
+                                                              for (SuperAction searchAction
+                                                                  in widget
+                                                                      .appBar
+                                                                      .searchBar!
+                                                                      .actions)
+                                                                searchAction.behavior ==
+                                                                        SuperActionBehavior
+                                                                            .alwaysVisible
+                                                                    ? searchAction
+                                                                    : const SizedBox(),
+                                                              AnimatedCrossFade(
+                                                                  firstChild:
+                                                                      Center(
+                                                                    child: Row(
+                                                                      children: widget
+                                                                          .appBar
+                                                                          .searchBar!
+                                                                          .actions
+                                                                          .where((e) =>
+                                                                              e.behavior ==
+                                                                              SuperActionBehavior.visibleOnFocus)
+                                                                          .toList(),
+                                                                    ),
+                                                                  ),
+                                                                  secondChild:
+                                                                      const SizedBox(),
+                                                                  crossFadeState: Store
+                                                                          .instance
+                                                                          .searchBarHasFocus
+                                                                          .value
+                                                                      ? CrossFadeState
+                                                                          .showFirst
+                                                                      : CrossFadeState
+                                                                          .showSecond,
+                                                                  duration: widget
+                                                                      .measures
+                                                                      .standartAnimationDuration),
+                                                              AnimatedCrossFade(
+                                                                  firstChild:
+                                                                      Center(
+                                                                    child: Row(
+                                                                      children: widget
+                                                                          .appBar
+                                                                          .searchBar!
+                                                                          .actions
+                                                                          .where((e) =>
+                                                                              e.behavior ==
+                                                                              SuperActionBehavior.visibleOnUnFocus)
+                                                                          .toList(),
+                                                                    ),
+                                                                  ),
+                                                                  secondChild:
+                                                                      const SizedBox(),
+                                                                  crossFadeState: Store
+                                                                          .instance
+                                                                          .searchBarHasFocus
+                                                                          .value
+                                                                      ? CrossFadeState
+                                                                          .showSecond
+                                                                      : CrossFadeState
+                                                                          .showFirst,
+                                                                  duration: widget
+                                                                      .measures
+                                                                      .standartAnimationDuration),
+                                                              Center(
+                                                                child:
+                                                                    CupertinoButton(
+                                                                  minSize: 0,
+                                                                  padding:
+                                                                      EdgeInsets
+                                                                          .zero,
+                                                                  color: Colors
+                                                                      .transparent,
+                                                                  onPressed:
+                                                                      () {
+                                                                    searchBarFocusThings(
+                                                                        false);
+                                                                    _focusNode
+                                                                        .unfocus();
+                                                                    _editingController
+                                                                        .clear();
+                                                                  },
+                                                                  child:
+                                                                      AnimatedContainer(
+                                                                    duration: widget
+                                                                        .measures
+                                                                        .standartAnimationDuration,
+                                                                    width: Store
+                                                                            .instance
+                                                                            .searchBarHasFocus
+                                                                            .value
+                                                                        ? textSize(
+                                                                            widget.appBar.searchBar!.cancelButtonText,
+                                                                            widget.appBar.searchBar!.cancelTextStyle)
+                                                                        : 0,
+                                                                    child:
+                                                                        Align(
+                                                                      alignment:
+                                                                          Alignment
+                                                                              .centerRight,
+                                                                      child: Text(
+                                                                          widget
+                                                                              .appBar
+                                                                              .searchBar!
+                                                                              .cancelButtonText,
+                                                                          style: widget
+                                                                              .appBar
+                                                                              .searchBar!
+                                                                              .cancelTextStyle,
+                                                                          maxLines:
+                                                                              1),
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                              ),
+                                                            ],
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  Row(
+                                                    crossAxisAlignment:
+                                                        CrossAxisAlignment
+                                                            .stretch,
+                                                    children: [
+                                                      Flexible(
+                                                        child: Focus(
+                                                          onFocusChange:
+                                                              (hasFocus) {
+                                                            if (isSubmitted) {
+                                                              isSubmitted =
+                                                                  false;
+                                                              return;
+                                                            }
+                                                            searchBarFocusThings(
+                                                                hasFocus);
+                                                            setState(() {});
+                                                          },
+                                                          child:
+                                                              CupertinoSearchTextField(
+                                                            onSubmitted: (s) {
+                                                              isSubmitted =
+                                                                  true;
+                                                              widget
+                                                                  .appBar
+                                                                  .searchBar!
+                                                                  .onSubmitted
+                                                                  ?.call(s);
+                                                            },
+                                                            onChanged: (v) {
+                                                              if (v
+                                                                  .isNotEmpty) {
+                                                                if (widget
+                                                                        .appBar
+                                                                        .searchBar!
+                                                                        .resultBehavior ==
+                                                                    SearchBarResultBehavior
+                                                                        .visibleOnInput) {
+                                                                  Store
+                                                                      .instance
+                                                                      .searchBarResultVisible
+                                                                      .value = true;
+                                                                }
+                                                              } else {
+                                                                if (widget
+                                                                        .appBar
+                                                                        .searchBar!
+                                                                        .resultBehavior ==
+                                                                    SearchBarResultBehavior
+                                                                        .visibleOnInput) {
+                                                                  Store
+                                                                      .instance
+                                                                      .searchBarResultVisible
+                                                                      .value = false;
+                                                                }
+                                                              }
+                                                              widget
+                                                                  .appBar
+                                                                  .searchBar!
+                                                                  .onChanged
+                                                                  ?.call(v);
+                                                            },
+                                                            prefixIcon: Opacity(
+                                                              opacity: opacity,
+                                                              child: widget
+                                                                  .appBar
+                                                                  .searchBar!
+                                                                  .prefixIcon,
+                                                            ),
+                                                            placeholder: widget
+                                                                .appBar
+                                                                .searchBar!
+                                                                .placeholderText,
+                                                            placeholderStyle: widget
+                                                                .appBar
+                                                                .searchBar!
+                                                                .placeholderTextStyle
+                                                                .copyWith(
+                                                              color: widget
+                                                                  .appBar
+                                                                  .searchBar!
+                                                                  .placeholderTextStyle
+                                                                  .color!
+                                                                  .withOpacity(
+                                                                      opacity),
+                                                            ),
+                                                            style: widget
+                                                                .appBar
+                                                                .searchBar!
+                                                                .textStyle
+                                                                .copyWith(
+                                                              color: widget
+                                                                      .appBar
+                                                                      .searchBar!
+                                                                      .textStyle
+                                                                      .color ??
+                                                                  Theme.of(
+                                                                          context)
+                                                                      .textTheme
+                                                                      .bodyMedium!
+                                                                      .color,
+                                                            ),
+                                                            controller:
+                                                                _editingController,
+                                                            focusNode:
+                                                                _focusNode,
+                                                            backgroundColor:
+                                                                Colors
+                                                                    .transparent,
+                                                            autocorrect: false,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                      Row(
+                                                        mainAxisAlignment:
+                                                            MainAxisAlignment
+                                                                .center,
+                                                        crossAxisAlignment:
+                                                            CrossAxisAlignment
+                                                                .center,
+                                                        children: [
+                                                          for (SuperAction searchAction
+                                                              in widget
+                                                                  .appBar
+                                                                  .searchBar!
+                                                                  .actions)
+                                                            searchAction.behavior ==
+                                                                    SuperActionBehavior
+                                                                        .alwaysVisible
+                                                                ? searchAction
+                                                                : const SizedBox(),
+                                                          AnimatedCrossFade(
+                                                              firstChild:
+                                                                  Center(
+                                                                child: Row(
+                                                                  children: widget
+                                                                      .appBar
+                                                                      .searchBar!
+                                                                      .actions
+                                                                      .where((e) =>
+                                                                          e.behavior ==
+                                                                          SuperActionBehavior
+                                                                              .visibleOnFocus)
+                                                                      .toList(),
+                                                                ),
+                                                              ),
+                                                              secondChild:
+                                                                  const SizedBox(),
+                                                              crossFadeState: Store
+                                                                      .instance
+                                                                      .searchBarHasFocus
+                                                                      .value
+                                                                  ? CrossFadeState
+                                                                      .showFirst
+                                                                  : CrossFadeState
+                                                                      .showSecond,
+                                                              duration: widget
+                                                                  .measures
+                                                                  .standartAnimationDuration),
+                                                          AnimatedCrossFade(
+                                                              firstChild:
+                                                                  Center(
+                                                                child: Row(
+                                                                  children: widget
+                                                                      .appBar
+                                                                      .searchBar!
+                                                                      .actions
+                                                                      .where((e) =>
+                                                                          e.behavior ==
+                                                                          SuperActionBehavior
+                                                                              .visibleOnUnFocus)
+                                                                      .toList(),
+                                                                ),
+                                                              ),
+                                                              secondChild:
+                                                                  const SizedBox(),
+                                                              crossFadeState: Store
+                                                                      .instance
+                                                                      .searchBarHasFocus
+                                                                      .value
+                                                                  ? CrossFadeState
+                                                                      .showSecond
+                                                                  : CrossFadeState
+                                                                      .showFirst,
+                                                              duration: widget
+                                                                  .measures
+                                                                  .standartAnimationDuration),
+                                                          Center(
+                                                            child:
+                                                                CupertinoButton(
+                                                              minSize: 0,
+                                                              padding:
+                                                                  EdgeInsets
+                                                                      .zero,
+                                                              color: Colors
+                                                                  .transparent,
+                                                              onPressed: () {
+                                                                searchBarFocusThings(
+                                                                    false);
+                                                                _focusNode
+                                                                    .unfocus();
+                                                                _editingController
+                                                                    .clear();
+                                                              },
+                                                              child:
+                                                                  AnimatedContainer(
+                                                                duration: widget
+                                                                    .measures
+                                                                    .standartAnimationDuration,
+                                                                width: Store
+                                                                        .instance
+                                                                        .searchBarHasFocus
+                                                                        .value
+                                                                    ? textSize(
+                                                                        widget
+                                                                            .appBar
+                                                                            .searchBar!
+                                                                            .cancelButtonText,
+                                                                        widget
+                                                                            .appBar
+                                                                            .searchBar!
+                                                                            .cancelTextStyle)
+                                                                    : 0,
+                                                                child: Align(
+                                                                  alignment:
+                                                                      Alignment
+                                                                          .centerRight,
+                                                                  child: Text(
+                                                                      widget
+                                                                          .appBar
+                                                                          .searchBar!
+                                                                          .cancelButtonText,
+                                                                      style: widget
+                                                                          .appBar
+                                                                          .searchBar!
+                                                                          .cancelTextStyle,
+                                                                      maxLines:
+                                                                          1),
+                                                                ),
+                                                              ),
+                                                            ),
+                                                          ),
+                                                        ],
                                                       ),
                                                     ],
                                                   ),
@@ -718,293 +1177,81 @@ class _SuperScaffoldState extends State<SuperScaffold> {
                                               ),
                                             ),
                                           ),
-                                          Row(
-                                            crossAxisAlignment:
-                                                CrossAxisAlignment.stretch,
+                                        ),
+                                        AnimatedContainer(
+                                          duration: widget.measures
+                                              .searchBarAnimationDuration,
+                                          height: widget
+                                              .measures.bottomToolbarHeight,
+                                          color: widget.appBar.bottom!.color,
+                                          child: Stack(
+                                            clipBehavior: Clip.none,
                                             children: [
-                                              Flexible(
-                                                child: Focus(
-                                                  onFocusChange: (hasFocus) {
-                                                    if (isSubmitted) {
-                                                      isSubmitted = false;
-                                                      return;
-                                                    }
-                                                    searchBarFocusThings(
-                                                        hasFocus);
-                                                    setState(() {});
-                                                  },
-                                                  child:
-                                                      CupertinoSearchTextField(
-                                                    onSubmitted: (s) {
-                                                      isSubmitted = true;
-                                                      widget.appBar.searchBar!
-                                                          .onSubmitted
-                                                          ?.call(s);
-                                                    },
-                                                    onChanged: (v) {
-                                                      if (v.isNotEmpty) {
-                                                        if (widget
-                                                                .appBar
-                                                                .searchBar!
-                                                                .resultBehavior ==
-                                                            SearchBarResultBehavior
-                                                                .visibleOnInput) {
-                                                          Store
-                                                              .instance
-                                                              .searchBarResultVisible
-                                                              .value = true;
-                                                        }
-                                                      } else {
-                                                        if (widget
-                                                                .appBar
-                                                                .searchBar!
-                                                                .resultBehavior ==
-                                                            SearchBarResultBehavior
-                                                                .visibleOnInput) {
-                                                          Store
-                                                              .instance
-                                                              .searchBarResultVisible
-                                                              .value = false;
-                                                        }
-                                                      }
-                                                      widget.appBar.searchBar!
-                                                          .onChanged
-                                                          ?.call(v);
-                                                    },
-                                                    prefixIcon: Opacity(
-                                                      opacity: opacity,
-                                                      child: widget
-                                                          .appBar
-                                                          .searchBar!
-                                                          .prefixIcon,
-                                                    ),
-                                                    placeholder: widget
-                                                        .appBar
-                                                        .searchBar!
-                                                        .placeholderText,
-                                                    placeholderStyle: widget
-                                                        .appBar
-                                                        .searchBar!
-                                                        .placeholderTextStyle
-                                                        .copyWith(
-                                                      color: widget
-                                                          .appBar
-                                                          .searchBar!
-                                                          .placeholderTextStyle
-                                                          .color!
-                                                          .withOpacity(opacity),
-                                                    ),
-                                                    style: widget.appBar
-                                                        .searchBar!.textStyle
-                                                        .copyWith(
-                                                      color: widget
-                                                              .appBar
-                                                              .searchBar!
-                                                              .textStyle
-                                                              .color ??
-                                                          Theme.of(context)
-                                                              .textTheme
-                                                              .bodyMedium!
-                                                              .color,
-                                                    ),
-                                                    controller:
-                                                        _editingController,
-                                                    focusNode: _focusNode,
-                                                    backgroundColor:
-                                                        Colors.transparent,
-                                                    autocorrect: false,
-                                                  ),
-                                                ),
-                                              ),
-                                              Row(
-                                                mainAxisAlignment:
-                                                    MainAxisAlignment.center,
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment.center,
-                                                children: [
-                                                  for (SuperAction searchAction
-                                                      in widget.appBar
-                                                          .searchBar!.actions)
-                                                    searchAction.behavior ==
-                                                            SuperActionBehavior
-                                                                .alwaysVisible
-                                                        ? searchAction
-                                                        : const SizedBox(),
-                                                  AnimatedCrossFade(
-                                                      firstChild: Center(
-                                                        child: Row(
-                                                          children: widget
-                                                              .appBar
-                                                              .searchBar!
-                                                              .actions
-                                                              .where((e) =>
-                                                                  e.behavior ==
-                                                                  SuperActionBehavior
-                                                                      .visibleOnFocus)
-                                                              .toList(),
-                                                        ),
-                                                      ),
-                                                      secondChild:
-                                                          const SizedBox(),
-                                                      crossFadeState: Store
-                                                              .instance
-                                                              .searchBarHasFocus
-                                                              .value
-                                                          ? CrossFadeState
-                                                              .showFirst
-                                                          : CrossFadeState
-                                                              .showSecond,
-                                                      duration: widget.measures
-                                                          .standartAnimationDuration),
-                                                  AnimatedCrossFade(
-                                                      firstChild: Center(
-                                                        child: Row(
-                                                          children: widget
-                                                              .appBar
-                                                              .searchBar!
-                                                              .actions
-                                                              .where((e) =>
-                                                                  e.behavior ==
-                                                                  SuperActionBehavior
-                                                                      .visibleOnUnFocus)
-                                                              .toList(),
-                                                        ),
-                                                      ),
-                                                      secondChild:
-                                                          const SizedBox(),
-                                                      crossFadeState: Store
-                                                              .instance
-                                                              .searchBarHasFocus
-                                                              .value
-                                                          ? CrossFadeState
-                                                              .showSecond
-                                                          : CrossFadeState
-                                                              .showFirst,
-                                                      duration: widget.measures
-                                                          .standartAnimationDuration),
-                                                  Center(
-                                                    child: CupertinoButton(
-                                                      minSize: 0,
-                                                      padding: EdgeInsets.zero,
-                                                      color: Colors.transparent,
-                                                      onPressed: () {
-                                                        searchBarFocusThings(
-                                                            false);
-                                                        _focusNode.unfocus();
-                                                        _editingController
-                                                            .clear();
-                                                      },
-                                                      child: AnimatedContainer(
-                                                        duration: widget
-                                                            .measures
-                                                            .standartAnimationDuration,
-                                                        width: Store
-                                                                .instance
-                                                                .searchBarHasFocus
-                                                                .value
-                                                            ? textSize(
-                                                                widget
-                                                                    .appBar
-                                                                    .searchBar!
-                                                                    .cancelButtonText,
-                                                                widget
-                                                                    .appBar
-                                                                    .searchBar!
-                                                                    .cancelTextStyle)
-                                                            : 0,
-                                                        child: Align(
-                                                          alignment: Alignment
-                                                              .centerRight,
-                                                          child: Text(
-                                                              widget
-                                                                  .appBar
-                                                                  .searchBar!
-                                                                  .cancelButtonText,
-                                                              style: widget
-                                                                  .appBar
-                                                                  .searchBar!
-                                                                  .cancelTextStyle,
-                                                              maxLines: 1),
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ],
+                                              Positioned(
+                                                height: widget.measures
+                                                    .bottomToolbarHeight,
+                                                bottom: 0,
+                                                left: 0,
+                                                right: 0,
+                                                child: components.appbarBottom!,
                                               ),
                                             ],
                                           ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                AnimatedContainer(
-                                  duration: widget
-                                      .measures.searchBarAnimationDuration,
-                                  height: widget.measures.bottomToolbarHeight,
-                                  color: widget.appBar.bottom!.color,
-                                  child: Stack(
-                                    clipBehavior: Clip.none,
-                                    children: [
-                                      Positioned(
-                                        height:
-                                            widget.measures.bottomToolbarHeight,
-                                        bottom: 0,
-                                        left: 0,
-                                        right: 0,
-                                        child: components.appbarBottom!,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            );
+                                        ),
+                                      ],
+                                    );
 
-                            if (!widget.transitionBetweenRoutes ||
-                                !isTransitionable(context)) {
-                              return childd;
-                            }
+                                    if (!widget.transitionBetweenRoutes ||
+                                        !isTransitionable(context)) {
+                                      return childd;
+                                    }
 
-                            return Hero(
-                              tag: HeroTag(Navigator.of(context)),
-                              createRectTween:
-                                  linearTranslateWithLargestRectSizeTween,
-                              flightShuttleBuilder:
-                                  navBarHeroFlightShuttleBuilder,
-                              placeholderBuilder: navBarHeroLaunchPadBuilder,
-                              transitionOnUserGestures: true,
-                              child: TransitionableNavigationBar(
-                                componentsKeys: keys,
-                                backgroundColor:
-                                    CupertinoDynamicColor.maybeResolve(
-                                            widget.appBar.backgroundColor,
-                                            context) ??
-                                        CupertinoTheme.of(context)
-                                            .barBackgroundColor,
-                                backButtonTextStyle: CupertinoTheme.of(context)
-                                    .textTheme
-                                    .navActionTextStyle,
-                                titleTextStyle: CupertinoTheme.of(context)
-                                    .textTheme
-                                    .navTitleTextStyle,
-                                largeTitleTextStyle:
-                                    widget.appBar.largeTitle!.textStyle,
-                                border: const Border(),
-                                hasUserMiddle: _collapsed,
-                                largeExpanded: !_collapsed &&
-                                    widget.appBar.largeTitle!.enabled,
-                                searchBarHasFocus:
-                                    Store.instance.searchBarHasFocus.value,
-                                child: childd,
-                              ),
-                            );
-                          }),
-                        ),
-                      );
-                    });
-              },
-            ),
-          ],
+                                    return Hero(
+                                      tag: HeroTag(Navigator.of(context)),
+                                      createRectTween:
+                                          linearTranslateWithLargestRectSizeTween,
+                                      flightShuttleBuilder:
+                                          navBarHeroFlightShuttleBuilder,
+                                      placeholderBuilder:
+                                          navBarHeroLaunchPadBuilder,
+                                      transitionOnUserGestures: true,
+                                      child: TransitionableNavigationBar(
+                                        componentsKeys: keys,
+                                        backgroundColor:
+                                            CupertinoDynamicColor.maybeResolve(
+                                                    widget
+                                                        .appBar.backgroundColor,
+                                                    context) ??
+                                                CupertinoTheme.of(context)
+                                                    .barBackgroundColor,
+                                        backButtonTextStyle:
+                                            CupertinoTheme.of(context)
+                                                .textTheme
+                                                .navActionTextStyle,
+                                        titleTextStyle:
+                                            CupertinoTheme.of(context)
+                                                .textTheme
+                                                .navTitleTextStyle,
+                                        largeTitleTextStyle:
+                                            widget.appBar.largeTitle!.textStyle,
+                                        border: const Border(),
+                                        hasUserMiddle: _collapsed,
+                                        largeExpanded: !_collapsed &&
+                                            widget.appBar.largeTitle!.enabled,
+                                        searchBarHasFocus: Store
+                                            .instance.searchBarHasFocus.value,
+                                        child: childd,
+                                      ),
+                                    );
+                                  }),
+                                ),
+                              );
+                            });
+                      },
+                    );
+                  }),
+            ],
+          ),
         ),
       ),
     );
@@ -1042,4 +1289,43 @@ double textSize(String text, TextStyle style) {
       textDirection: TextDirection.ltr)
     ..layout(minWidth: 0, maxWidth: double.infinity);
   return textPainter.size.width * 1.4;
+}
+
+class CirclePainter extends CustomPainter {
+  final double scrollOffset;
+  final Color color;
+  CirclePainter(
+    this.scrollOffset,
+    this.color,
+  );
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final Paint paint = Paint();
+
+    final double radius = size.width / 2;
+    final double centerX = size.width / 2;
+    final double centerY = size.height / 2;
+
+    // Calculate the fill percentage based on scroll offset
+    const double maxScrollOffset = -25.0;
+    final double fillPercentage =
+        ((scrollOffset - maxScrollOffset) / -maxScrollOffset).clamp(0.0, 1.0);
+    final double sweepAngle = 2 * 3.141592653589793 * fillPercentage;
+
+    paint.color = color;
+    paint.style = PaintingStyle.stroke;
+    paint.strokeWidth = radius * 2;
+    canvas.drawArc(
+        Rect.fromCircle(center: Offset(centerX, centerY), radius: radius),
+        -3.141592653589793 / 2,
+        sweepAngle,
+        false,
+        paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) {
+    return true;
+  }
 }

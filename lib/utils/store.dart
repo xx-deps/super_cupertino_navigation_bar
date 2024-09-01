@@ -17,6 +17,7 @@ class Store {
   final ValueNotifier<SearchBarAnimationStatus> searchBarAnimationStatus =
       ValueNotifier(SearchBarAnimationStatus.paused);
   final ValueNotifier<double> scrollOffset = ValueNotifier<double>(0);
+  final ValueNotifier<bool> refreshLoading = ValueNotifier(false);
 }
 
 enum SearchBarAnimationStatus { started, onGoing, paused }

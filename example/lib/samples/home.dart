@@ -40,6 +40,10 @@ class _HomeState extends State<Home> {
         },
         transitionBetweenRoutes: true,
         stretch: stretch,
+        enableRefresh: true,
+        onRefresh: () async {
+          await Future.delayed(const Duration(milliseconds: 5000));
+        },
         appBar: SuperAppBar(
           backgroundColor: Colors.black,
           title: Text(

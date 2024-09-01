@@ -38,6 +38,10 @@ class _AppleItunesState extends State<AppleItunes> {
               print("collapsed => $val");
             },
             stretch: true,
+            enableRefresh: true,
+            onRefresh: () async {
+              await Future.delayed(const Duration(milliseconds: 5000));
+            },
             appBar: SuperAppBar(
               title: CupertinoSlidingSegmentedControl<int>(
                 backgroundColor: CupertinoColors.darkBackgroundGray,
