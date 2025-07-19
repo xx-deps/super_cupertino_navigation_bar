@@ -7,6 +7,7 @@ import 'package:snap_scroll_physics/snap_scroll_physics.dart';
 import 'package:super_cupertino_navigation_bar/models/super_appbar.model.dart';
 import 'package:super_cupertino_navigation_bar/models/super_search_bar.model.dart';
 import 'package:super_cupertino_navigation_bar/models/super_search_bar_action.model.dart';
+import 'package:super_cupertino_navigation_bar/src/custom_search_bar.dart';
 import 'package:super_cupertino_navigation_bar/utils/hero_tag.dart';
 import 'package:super_cupertino_navigation_bar/utils/hero_things.dart';
 import 'package:super_cupertino_navigation_bar/utils/measures.dart';
@@ -17,7 +18,7 @@ import 'package:super_cupertino_navigation_bar/utils/transitionable_navigation_b
 
 class SuperScaffold extends StatefulWidget {
   SuperScaffold({
-    Key? key,
+    super.key,
     required this.appBar,
     this.stretch = true,
     this.body = const SizedBox(),
@@ -25,7 +26,7 @@ class SuperScaffold extends StatefulWidget {
     this.brightness,
     this.scrollController,
     this.transitionBetweenRoutes = true,
-  }) : super(key: key) {
+  }) {
     measures = Measures(
       searchTextFieldHeight: appBar.searchBar!.height,
       largeTitleContainerHeight: appBar.largeTitle!.height,
@@ -99,19 +100,43 @@ class _SuperScaffoldState extends State<SuperScaffold> {
   double _scrollOffset = 0;
   bool _collapsed = false;
   bool isSubmitted = false;
+  bool isCanceled = false;
   late TextEditingController _editingController;
+  TextEditingController? _privateEditingController;
   late FocusNode _focusNode;
+  FocusNode? _privateFocusNode;
   late ScrollController _scrollController;
+  ScrollController? _privateScrollController;
   late NavigationBarStaticComponentsKeys keys;
 
   @override
   void initState() {
     super.initState();
     keys = NavigationBarStaticComponentsKeys();
-    _editingController =
-        widget.appBar.searchBar!.searchController ?? TextEditingController();
-    _focusNode = widget.appBar.searchBar!.searchFocusNode ?? FocusNode();
-    _scrollController = widget.scrollController ?? ScrollController();
+    final controller = widget.appBar.searchBar?.searchController;
+    if (controller == null) {
+      final privateController = TextEditingController();
+      _privateEditingController = privateController;
+      _editingController = privateController;
+    } else {
+      _privateEditingController = controller;
+    }
+    final focusNode = widget.appBar.searchBar?.searchFocusNode;
+    if (focusNode == null) {
+      final privateFocusNode = FocusNode();
+      _focusNode = privateFocusNode;
+      _privateFocusNode = privateFocusNode;
+    } else {
+      _focusNode = focusNode;
+    }
+    final scrollController = widget.scrollController;
+    if (scrollController == null) {
+      final privateScrollController = ScrollController();
+      _scrollController = privateScrollController;
+      _privateScrollController = privateScrollController;
+    } else {
+      _scrollController = scrollController;
+    }
     WidgetsBinding.instance.addPostFrameCallback((timeStamp) {
       _scrollController.addListener(() {
         _scrollOffset = _scrollController.offset;
@@ -119,6 +144,14 @@ class _SuperScaffoldState extends State<SuperScaffold> {
         checkIfCollapsed();
       });
     });
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+    _privateEditingController?.dispose();
+    _privateFocusNode?.dispose();
+    _privateScrollController?.dispose();
   }
 
   checkIfCollapsed() {
@@ -535,7 +568,8 @@ class _SuperScaffoldState extends State<SuperScaffold> {
                                                 children: [
                                                   Flexible(
                                                     child:
-                                                        CupertinoSearchTextField(
+                                                        CustomCupertinoSearchTextField(
+                                                      itemSize: 18,
                                                       prefixIcon: Opacity(
                                                         opacity: Store
                                                                 .instance
@@ -567,8 +601,8 @@ class _SuperScaffoldState extends State<SuperScaffold> {
                                                             .searchBar!
                                                             .placeholderTextStyle
                                                             .color!
-                                                            .withOpacity(
-                                                                opacity),
+                                                            .withValues(
+                                                                alpha: opacity),
                                                       ),
                                                       style: widget.appBar
                                                           .searchBar!.textStyle
@@ -663,19 +697,31 @@ class _SuperScaffoldState extends State<SuperScaffold> {
                                                               .standartAnimationDuration),
                                                       Center(
                                                         child: CupertinoButton(
-                                                          minSize: 0,
                                                           padding:
                                                               EdgeInsets.zero,
                                                           color: Colors
                                                               .transparent,
                                                           onPressed: () {
+                                                            isCanceled = true;
                                                             searchBarFocusThings(
                                                                 false);
                                                             _focusNode
                                                                 .unfocus();
                                                             _editingController
                                                                 .clear();
+                                                            Future.delayed(
+                                                                const Duration(
+                                                                    milliseconds:
+                                                                        300),
+                                                                () {
+                                                              isSubmitted =
+                                                                  false;
+                                                              isCanceled =
+                                                                  false;
+                                                            });
                                                           },
+                                                          minimumSize:
+                                                              const Size(0, 0),
                                                           child:
                                                               AnimatedContainer(
                                                             duration: widget
@@ -725,16 +771,21 @@ class _SuperScaffoldState extends State<SuperScaffold> {
                                               Flexible(
                                                 child: Focus(
                                                   onFocusChange: (hasFocus) {
-                                                    if (isSubmitted) {
-                                                      isSubmitted = false;
+                                                    if (isCanceled ||
+                                                        isSubmitted) {
+                                                      widget.appBar.searchBar!
+                                                          .onFocused
+                                                          ?.call(hasFocus);
                                                       return;
                                                     }
                                                     searchBarFocusThings(
                                                         hasFocus);
                                                     setState(() {});
+                                                    isSubmitted = true;
                                                   },
                                                   child:
-                                                      CupertinoSearchTextField(
+                                                      CustomCupertinoSearchTextField(
+                                                    itemSize: 18,
                                                     onSubmitted: (s) {
                                                       isSubmitted = true;
                                                       widget.appBar.searchBar!
@@ -792,7 +843,8 @@ class _SuperScaffoldState extends State<SuperScaffold> {
                                                           .searchBar!
                                                           .placeholderTextStyle
                                                           .color!
-                                                          .withOpacity(opacity),
+                                                          .withValues(
+                                                              alpha: opacity),
                                                     ),
                                                     style: widget.appBar
                                                         .searchBar!.textStyle
@@ -884,16 +936,28 @@ class _SuperScaffoldState extends State<SuperScaffold> {
                                                           .standartAnimationDuration),
                                                   Center(
                                                     child: CupertinoButton(
-                                                      minSize: 0,
                                                       padding: EdgeInsets.zero,
                                                       color: Colors.transparent,
                                                       onPressed: () {
+                                                        isCanceled = true;
                                                         searchBarFocusThings(
                                                             false);
                                                         _focusNode.unfocus();
                                                         _editingController
                                                             .clear();
+                                                        widget.appBar.searchBar
+                                                            ?.onCancel
+                                                            ?.call();
+                                                        Future.delayed(
+                                                            const Duration(
+                                                                milliseconds:
+                                                                    300), () {
+                                                          isSubmitted = false;
+                                                          isCanceled = false;
+                                                        });
                                                       },
+                                                      minimumSize:
+                                                          const Size(0, 0),
                                                       child: AnimatedContainer(
                                                         duration: widget
                                                             .measures

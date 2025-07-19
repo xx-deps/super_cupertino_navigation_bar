@@ -73,7 +73,7 @@ class SuperAppBar {
   ///     appBar: AppBar(
   ///       title: SizedBox(
   ///         height: _myToolbarHeight,
-  ///         child: Image.asset(_logoAsset),
+  ///         child: Image.asset(_logoAsset),  //ignore check in bump
   ///       ),
   ///       toolbarHeight: _myToolbarHeight,
   ///     ),
