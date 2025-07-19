@@ -28,6 +28,7 @@ class SuperSearchBar {
   final ValueChanged<String>? onChanged;
   final ValueChanged<bool>? onFocused;
   final ValueChanged<String>? onSubmitted;
+  final VoidCallback? onCancel;
   TextEditingController? searchController;
   FocusNode? searchFocusNode;
   final Color backgroundColor;
@@ -62,6 +63,7 @@ class SuperSearchBar {
     this.onChanged,
     this.onSubmitted,
     this.onFocused,
+    this.onCancel,
     this.searchController,
     this.searchFocusNode,
   });
